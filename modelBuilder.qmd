@@ -1,7 +1,17 @@
 ---
 title: "Model Builder"
-format: html
-editor: visual
+author: "James"
+format:
+  html: 
+    theme: "pulse"
+    self-contained: true
+    embed-resources: true
+execute: 
+  error: true
+  warning: false
+  eval: true
+fig-asp: 0.618
+fig-width: 10
 ---
 
 # Model Creating
@@ -20,18 +30,25 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Embedding, LSTM, Dense, Dropout
 ```
 
-
 ## Data Loading
 
+I will use the FOMC speeches and compare how they affect the S&P500 Index.
+
 ```{python gather-data}
-speechesDF = pd.read_csv("data/speechData.csv").iloc[:,1:]
+speechesDF = pd.read_csv("data/speechData.csv").iloc[:,1:] #Removes extra col
 snpDF = pd.read_csv("data/stocks/snp.csv").iloc[:,1:]
 ```
 
 ## Data Manipulation
+
+I want to see the lasting effects from a speech. I will use the 5 day percent change for this. How much did the index change over the five days *after* the speech?
+
 ```{python data-manip}
 snpDF["5day%Change"] = [(snpDF["snp_Close"][i + 5] - snpDF["snp_Close"][i]) / snpDF["snp_Close"][i] for i in range(len(snpDF["snp_Close"]) - 5)] + [0 for _ in range(5)]
 ```
+
+
+Now, let's make sure we only consider the days that have both a speech and stock data.
 
 ```{python final-checks}
 snp_using = snpDF[snpDF["Date"].isin(speechesDF["Date"])]
@@ -42,19 +59,19 @@ speeches = fomc_using["Text"][:-5]
 labels = snp_using["5day%Change"][:-5] #Last 5 are 0's
 ```
 
-
 ## Preprocessing
+
 ```{python preprocessing}
 # Parameters
-max_vocab_size = 5000
-max_sequence_length = 100
-embedding_dim = 128
+max_vocab_size = 5000 # Limit on most common unique words
+max_sequence_length = 100 # Limit on sentence length
+embedding_dim = 128 # Word vector dimension
 
 # Tokenization
 tokenizer = Tokenizer(num_words=max_vocab_size)
-tokenizer.fit_on_texts(speeches)
-sequences = tokenizer.texts_to_sequences(speeches)
-padded_sequences = pad_sequences(sequences, maxlen=max_sequence_length, padding='post')
+tokenizer.fit_on_texts(speeches) # Creates a token for each word
+sequences = tokenizer.texts_to_sequences(speeches) 
+padded_sequences = pad_sequences(sequences, maxlen=max_sequence_length, padding='post') #Push sequences to a fixed length
 
 X_train, X_test, y_train, y_test = train_test_split(padded_sequences, labels, test_size = 0.3, random_state = 10)
 
@@ -65,6 +82,9 @@ X_train, X_test, y_train, y_test = train_test_split(padded_sequences, labels, te
 ```{python model-creation}
 #| eval: false
 def lstmModel():
+  '''
+  Method to create a Deep Learning Recurrent Neural Network
+  '''
     model = Sequential([
         Embedding(input_dim=max_vocab_size, output_dim=embedding_dim),
         LSTM(128, return_sequences=True),
@@ -75,6 +95,7 @@ def lstmModel():
     ])
     return model
 
+# Creating two models: One with MSE and one with MAE as the error term
 MSElstm = lstmModel()
 MAElstm = lstmModel()
 
@@ -93,23 +114,28 @@ MSElstm = load("models/speeches/MSElstm.joblib")
 MAElstm = load("models/speeches/MAElstm.joblib")
 ```
 
+## Analysis
+
 ```{python testing-correctness}
 mse = [mean_squared_error(MSElstm.predict(X_test), y_test), mean_squared_error(MAElstm.predict(X_test), y_test)]
 mae = [mean_absolute_error(MSElstm.predict(X_test), y_test), mean_absolute_error(MAElstm.predict(X_test), y_test)]
+
+# Comparing the models against each other
 pd.DataFrame({
   "Model" : ["MSE", "MAE"],
   "MSE" : mse,
   "MAE" : mae
 })
 ```
-At a glance, this appears to handle the data quite well! Let's consider the plot of the actual change versus the predicted change.
 
+At a glance, this appears to handle the data quite well! Let's consider the plot of the actual change versus the predicted change.
 
 ## Visualization
 
 ```{python visual-imports}
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
+import matplotlib.patches as mpatches
 import seaborn as sns
 ```
 
@@ -127,8 +153,6 @@ plt.figure(figsize=(10, 6))
 for i, column in enumerate(df.columns):
     sns.scatterplot(x=df.index, y=df[column], label=column, color=colors[i])
 
-plt.gca().yaxis.set_major_formatter(PercentFormatter(xmax=1))
-
 plt.title('5 Day Percent Change after FOMC Speech')
 plt.xlabel('Date')
 plt.ylabel('Value')
@@ -137,7 +161,95 @@ plt.grid(True)
 plt.show()
 ```
 
-From the image, we can clearly see that the speeches aren't being fit well. 
+From the image, we can clearly see that the speeches aren't being fit well. We can actually go a step further as well. Lets take each of the points and assign it a value. It'll be green if it lies within a 0.01 threshold of the actual change and red otherwise. Here is the Mean Absolute Error model:
+
+```{python individual-comparison-colored-mae}
+df = pd.DataFrame({
+    "Actual": list(y_test),
+    "MAE Predict": [i[0] for i in list(MAElstm.predict(X_test))]
+}).sort_values(by='Actual').reset_index().drop(columns=["index"])
+df['Correctness'] = abs(df["Actual"] - df["MAE Predict"]) < 0.01
+
+plt.clf()
+
+df = df.reset_index()
+fig, ax = plt.subplots(figsize=(14, 6))
+
+# Define the color palette and map colors based on 'Correctness'
+palette = sns.color_palette("colorblind", 2)
+df['Color'] = df['Correctness'].map({True: palette[1], False: palette[0]})
+
+# Actual scatterplot
+ax.plot(df.index, df['Actual'], 'ko', label='Actual', markersize=5)  # 'ko' is dark color and circle markets
+
+# Predict scatterplot
+scatter = plt.scatter(x=df['index'], y=df['MAE Predict'], c=df['Color'], s=50, alpha=0.9, edgecolor='k')
+
+# Manaually create legend to fix matplotlib issue
+correct_patch = mpatches.Patch(color=palette[1], label='Correct')
+incorrect_patch = mpatches.Patch(color=palette[0], label='Incorrect')
+
+# Plot legend
+plt.legend(handles=[correct_patch, incorrect_patch], loc='upper right')
+
+# Axis labels
+plt.grid(True)
+plt.xlabel('Index')
+plt.ylabel('Value')
+plt.title('Actual vs MAE Predict with Correctness Color')
+
+plt.tight_layout()
+plt.show()
+```
+
+We can do the same process to see the results for the mean squared error model.
+
+```{python individual-comparison-colored-mse}
+df2 = pd.DataFrame({
+    "Actual": list(y_test),
+    "MSE Predict": [i[0] for i in list(MSElstm.predict(X_test))]
+}).sort_values(by='Actual').reset_index().drop(columns=["index"])
+df2['Correctness'] = abs(df["Actual"] - df2["MSE Predict"]) < 0.01
+
+plt.clf()
+
+df2 = df2.reset_index()
+fig, ax = plt.subplots(figsize=(14, 6))
+
+# Define the color palette and map colors based on 'Correctness'
+palette = sns.color_palette("colorblind", 2)
+df2['Color'] = df2['Correctness'].map({True: palette[1], False: palette[0]})
+
+# Actual scatterplot
+ax.plot(df2.index, df2['Actual'], 'ko', label='Actual', markersize=5)  # 'ko' is dark color and circle markets
+
+# Predict scatterplot
+scatter = plt.scatter(x=df2['index'], y=df2['MSE Predict'], c=df2['Color'], s=50, alpha=0.9, edgecolor='k')
+
+# Manaually create legend to fix matplotlib issue
+correct_patch = mpatches.Patch(color=palette[1], label='Correct')
+incorrect_patch = mpatches.Patch(color=palette[0], label='Incorrect')
+
+# Plot legend
+plt.legend(handles=[correct_patch, incorrect_patch], loc='upper right')
+
+# Axis labels
+plt.grid(True)
+plt.xlabel('Index')
+plt.ylabel('Value')
+plt.title('Actual vs MSE Predict with Correctness Color')
+
+plt.tight_layout()
+plt.show()
+```
+
+
+```{python correctness-overall}
+print(f'MAE got {len([i for i in range(len(df)) if list(df["Correctness"])[i]]) * 100 / len(df)}% correct while MSE got {np.round(len([i for i in range(len(df)) if list(df2["Correctness"])[i]])* 100 / len(df), 2)}% correct')
+```
+
+We can see that, overall, the mean absolute error did better, but only fractionally. It was within a percent of the actual 5 day movement only 43.75% of the time. In order to raise this, we need more data to build from.
+
 
 
 
