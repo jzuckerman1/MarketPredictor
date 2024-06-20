@@ -42,11 +42,11 @@ class IndexData:
     @staticmethod
     def getYahooData(tick : Ticker):
         '''
-        Gathers the past ten years of historical data from a ticker and saves it as a CSV
+        Gathers the past ten years of historical data from a ticker and saves it as a CSV.
         
         Parameters:
           tick : Ticker
-            The desired ticker to collect data of
+            The desired ticker to collect data.
         '''
         ticker = yf.Ticker(tick.name)
         historical_data = ticker.history(period='10y')
@@ -56,12 +56,11 @@ class IndexData:
         data.columns = [f'{tick.saveAs}_{col}' if not(col == 'Date') else col for col in data.columns] #Rename columns
         data.to_csv("../data/stocks/" + tick.saveAs + ".csv")
       
-    @staticmethod
-    def main():
-        for ticker in IndexData.tickers:
-          IndexData.getYahooData(ticker)
+def main():
+    for ticker in IndexData.tickers:
+      IndexData.getYahooData(ticker)
         
 
 if __name__ == '__main__':
-    IndexData.main()
+    main()
     
