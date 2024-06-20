@@ -1,0 +1,144 @@
+---
+title: "Model Builder"
+format: html
+editor: visual
+---
+
+# Model Creating
+
+## Imports
+
+```{python imports}
+import pandas as pd
+import numpy as np
+from joblib import dump, load
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Embedding, LSTM, Dense, Dropout
+```
+
+
+## Data Loading
+
+```{python gather-data}
+speechesDF = pd.read_csv("data/speechData.csv").iloc[:,1:]
+snpDF = pd.read_csv("data/stocks/snp.csv").iloc[:,1:]
+```
+
+## Data Manipulation
+```{python data-manip}
+snpDF["5day%Change"] = [(snpDF["snp_Close"][i + 5] - snpDF["snp_Close"][i]) / snpDF["snp_Close"][i] for i in range(len(snpDF["snp_Close"]) - 5)] + [0 for _ in range(5)]
+```
+
+```{python final-checks}
+snp_using = snpDF[snpDF["Date"].isin(speechesDF["Date"])]
+fomc_using = speechesDF[speechesDF["Date"].isin(snpDF["Date"])].drop_duplicates(subset=['Date']) #Removing multiple speeches on the same day for now
+assert(len(fomc_using) == len(snp_using))
+
+speeches = fomc_using["Text"][:-5]
+labels = snp_using["5day%Change"][:-5] #Last 5 are 0's
+```
+
+
+## Preprocessing
+```{python preprocessing}
+# Parameters
+max_vocab_size = 5000
+max_sequence_length = 100
+embedding_dim = 128
+
+# Tokenization
+tokenizer = Tokenizer(num_words=max_vocab_size)
+tokenizer.fit_on_texts(speeches)
+sequences = tokenizer.texts_to_sequences(speeches)
+padded_sequences = pad_sequences(sequences, maxlen=max_sequence_length, padding='post')
+
+X_train, X_test, y_train, y_test = train_test_split(padded_sequences, labels, test_size = 0.3, random_state = 10)
+
+```
+
+## Model Creation
+
+```{python model-creation}
+#| eval: false
+def lstmModel():
+    model = Sequential([
+        Embedding(input_dim=max_vocab_size, output_dim=embedding_dim),
+        LSTM(128, return_sequences=True),
+        Dropout(0.5), #prevent overfitting
+        LSTM(64),
+        Dropout(0.5),
+        Dense(1)  # Regression output
+    ])
+    return model
+
+MSElstm = lstmModel()
+MAElstm = lstmModel()
+
+MSElstm.compile(optimizer='adam', loss='mean_squared_error', metrics=['mean_absolute_error'])
+MAElstm.compile(optimizer='adam', loss='mean_absolute_error', metrics=['mean_absolute_error'])
+
+MSElstm.fit(X_train, y_train, epochs=10, batch_size=32)
+MAElstm.fit(X_train, y_train, epochs=10, batch_size=32)
+
+dump(MSElstm, "models/speeches/MSElstm.joblib")
+dump(MAElstm, "models/speeches/MAElstm.joblib")
+```
+
+```{python model-loading}
+MSElstm = load("models/speeches/MSElstm.joblib")
+MAElstm = load("models/speeches/MAElstm.joblib")
+```
+
+```{python testing-correctness}
+mse = [mean_squared_error(MSElstm.predict(X_test), y_test), mean_squared_error(MAElstm.predict(X_test), y_test)]
+mae = [mean_absolute_error(MSElstm.predict(X_test), y_test), mean_absolute_error(MAElstm.predict(X_test), y_test)]
+pd.DataFrame({
+  "Model" : ["MSE", "MAE"],
+  "MSE" : mse,
+  "MAE" : mae
+})
+```
+At a glance, this appears to handle the data quite well! Let's consider the plot of the actual change versus the predicted change.
+
+
+## Visualization
+
+```{python visual-imports}
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
+import seaborn as sns
+```
+
+```{python scatterplot}
+df = pd.DataFrame({
+  "Actual" : list(y_test),
+  "MAE Predict" : [i[0] for i in list(MAElstm.predict(X_test))],
+  "MSE Predict" : [i[0] for i in list(MSElstm.predict(X_test))]
+}).sort_values(by='Actual').reset_index().drop(columns=["index"])
+
+colors = sns.color_palette("colorblind")
+
+# Plotting
+plt.figure(figsize=(10, 6))
+for i, column in enumerate(df.columns):
+    sns.scatterplot(x=df.index, y=df[column], label=column, color=colors[i])
+
+plt.gca().yaxis.set_major_formatter(PercentFormatter(xmax=1))
+
+plt.title('5 Day Percent Change after FOMC Speech')
+plt.xlabel('Date')
+plt.ylabel('Value')
+plt.legend(title='Datapoints')
+plt.grid(True)
+plt.show()
+```
+
+From the image, we can clearly see that the speeches aren't being fit well. 
+
+
+
+
