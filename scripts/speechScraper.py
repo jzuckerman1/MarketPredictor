@@ -58,9 +58,8 @@ class FOMCData:
             
             next_button_tag = ".pagination-next .ng-binding"
             next_button = driver.find_element(By.CSS_SELECTOR, next_button_tag)
-            disabled = next_button.get_attribute('disabled')
             
-            if disabled == "disabled":
+            if next_button.get_attribute('disabled'):
                 break
             else:
                 next_button.click()
@@ -119,8 +118,8 @@ class Scraper:
         "Name": name,
         "Date": date,
         "Length": speech_length,
-        "Text": full_speech,
-      }, index=[0])
+        "Text": speech_breakup
+      })
       
       return framed_data
   
@@ -128,15 +127,17 @@ class Scraper:
 def main():
     all_speeches = FOMCData.scrape_main_page()
     df = Scraper.scrape_page(all_speeches.pop())
+    df = df.groupby(["Title", "Name", "Date", "Length"])['Text'].apply(list).reset_index()
     for speech in all_speeches:
         try:
-          df = pd.concat([df, Scraper.scrape_page(speech)])
+          new_speech = Scraper.scrape_page(speech)
+          addOn = new_speech.groupby(["Title", "Name", "Date", "Length"])['Text'].apply(list).reset_index()
+          df = pd.concat([df, addOn]).reset_index().iloc[:,1:]
         except:
           print(f'{speech} failed due to inalignment')
     df.to_csv("../data/speechData.csv")
     
 if __name__ == '__main__':
     main()
-        
       
-  
+

@@ -14,20 +14,23 @@ fig-asp: 0.618
 fig-width: 10
 ---
 
-# Model Creating
-
 ## Imports
 
 ```{python imports}
 import pandas as pd
 import numpy as np
+import importlib
 from joblib import dump, load
+from datetime import datetime as dt
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.model_selection import train_test_split
+from transformers import BertTokenizer, TFBertModel
+import tensorflow as tf
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Embedding, LSTM, Dense, Dropout
+from tensorflow.keras.models import Model
 ```
 
 ## Data Loading
@@ -36,6 +39,9 @@ I will use the FOMC speeches and compare how they affect the S&P500 Index.
 
 ```{python gather-data}
 speechesDF = pd.read_csv("data/speechData.csv").iloc[:,1:] #Removes extra col
+
+speechesDF.columns
+speeches = speechesDF.groupby(['Title', 'Name', 'Date', 'Length'])['Text'].apply(list).reset_index()
 snpDF = pd.read_csv("data/stocks/snp.csv").iloc[:,1:]
 ```
 
@@ -59,6 +65,8 @@ speeches = fomc_using["Text"][:-5]
 labels = snp_using["5day%Change"][:-5] #Last 5 are 0's
 ```
 
+# Individual Model Creating
+
 ## Preprocessing
 
 ```{python preprocessing}
@@ -74,7 +82,6 @@ sequences = tokenizer.texts_to_sequences(speeches)
 padded_sequences = pad_sequences(sequences, maxlen=max_sequence_length, padding='post') #Push sequences to a fixed length
 
 X_train, X_test, y_train, y_test = train_test_split(padded_sequences, labels, test_size = 0.3, random_state = 10)
-
 ```
 
 ## Model Creation
@@ -82,9 +89,9 @@ X_train, X_test, y_train, y_test = train_test_split(padded_sequences, labels, te
 ```{python model-creation}
 #| eval: false
 def lstmModel():
-  '''
-  Method to create a Deep Learning Recurrent Neural Network
-  '''
+    '''
+    Method to create a Deep Learning Recurrent Neural Network
+    '''
     model = Sequential([
         Embedding(input_dim=max_vocab_size, output_dim=embedding_dim),
         LSTM(128, return_sequences=True),
@@ -250,7 +257,36 @@ print(f'MAE got {len([i for i in range(len(df)) if list(df["Correctness"])[i]]) 
 
 We can see that, overall, the mean absolute error did better, but only fractionally. It was within a percent of the actual 5 day movement only 43.75% of the time. In order to raise this, we need more data to build from.
 
+# Personal Neural Network Approach
 
+I want to use my own Neural Network to see if it can compete with other, more developed models. We can use the same preprocessing setup.
+
+
+```{python preprocessing}
+# Parameters
+max_vocab_size = 5000 # Limit on most common unique words
+max_sequence_length = 100 # Limit on sentence length
+embedding_dim = 128 # Word vector dimension
+
+# Tokenization
+tokenizer = Tokenizer(num_words=max_vocab_size)
+tokenizer.fit_on_texts(speeches) # Creates a token for each word
+sequences = tokenizer.texts_to_sequences(speeches) 
+padded_sequences = pad_sequences(sequences, maxlen=max_sequence_length, padding='post') #Push sequences to a fixed length
+
+X_train, X_test, y_train, y_test = train_test_split(padded_sequences, labels, test_size = 0.3, random_state = 10)
+
+trainData = [(np.array(x), np.array(y)) for x,y in zip(X_train, y_train)]
+testData = [(np.array(x), np.array(y)) for x,y in zip(X_test, y_test)]
+```
+
+```{python}
+from scripts.myNeuralNet import Network
+import numpy as np
+myNetwork = Network([int(i) for i in list(np.linspace(max_vocab_size, 1, 12))])
+myNetwork.SGD(training_data = trainData, epochs = 10, mini_batch_size = 10, learningRate = 2, test_data = testData)
+
+```
 
 
 
