@@ -24,7 +24,6 @@ from joblib import dump, load
 from datetime import datetime as dt
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.model_selection import train_test_split
-from transformers import BertTokenizer, TFBertModel
 import tensorflow as tf
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
