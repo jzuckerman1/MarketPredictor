@@ -262,7 +262,7 @@ We can see that, overall, the mean absolute error did better, but only fractiona
 I want to use my own Neural Network to see if it can compete with other, more developed models. We can use the same preprocessing setup.
 
 
-```{python preprocessing}
+```{python myNetwork-preprocessing}
 # Parameters
 max_vocab_size = 5000 # Limit on most common unique words
 max_sequence_length = 100 # Limit on sentence length
@@ -276,17 +276,68 @@ padded_sequences = pad_sequences(sequences, maxlen=max_sequence_length, padding=
 
 X_train, X_test, y_train, y_test = train_test_split(padded_sequences, labels, test_size = 0.3, random_state = 10)
 
-trainData = [(np.array(x), np.array(y)) for x,y in zip(X_train, y_train)]
-testData = [(np.array(x), np.array(y)) for x,y in zip(X_test, y_test)]
+# Important to make input vectors into 
+trainData = [(np.array(x).reshape(-1, 1), np.array(y).reshape(-1, 1)) for x,y in zip(X_train, y_train)]
+testData = [(np.array(x).reshape(-1, 1), np.array(y).reshape(-1, 1)) for x,y in zip(X_test, y_test)]
 ```
 
-```{python}
+
+```{python myNetwork-Implementation}
 from scripts.myNeuralNet import Network
 import numpy as np
-myNetwork = Network([int(i) for i in list(np.linspace(max_vocab_size, 1, 12))])
-myNetwork.SGD(training_data = trainData, epochs = 10, mini_batch_size = 10, learningRate = 2, test_data = testData)
 
+myNetwork = Network([100, 50, 20, 1]) # Same setup as the popular model
+myNetwork.SGD(training_data = trainData, epochs = 300, mini_batch_size = 32, learningRate = 0.1, test_data = testData)
 ```
 
+Now, we can compare our personal network to that of the industry standard.
+```{python individual-comparison-colored-mse}
+df3 = pd.DataFrame({
+    "Actual": [pair[1] for pair in testData],
+    "Predicted": [myNetwork.feedForward(pair[0]) for pair in testData]
+}).sort_values(by='Actual').reset_index().drop(columns=["index"])
 
+df3['Correctness'] = abs(df3["Actual"] - df3["Predicted"]) < 0.01
+
+plt.clf()
+
+df3 = df3.reset_index()
+fig, ax = plt.subplots(figsize=(14, 6))
+
+# Define the color palette and map colors based on 'Correctness'
+palette = sns.color_palette("colorblind", 2)
+df3['Color'] = df3['Correctness'].map({True: palette[1], False: palette[0]})
+
+# Actual scatterplot
+ax.plot(df3.index, df3['Actual'], 'ko', label='Actual', markersize=5)  # 'ko' is dark color and circle markets
+
+# Predict scatterplot
+scatter = plt.scatter(x=df3['index'], y=df3['Predicted'], c=df3['Color'], s=50, alpha=0.9, edgecolor='k')
+
+# Manaually create legend to fix matplotlib issue
+correct_patch = mpatches.Patch(color=palette[1], label='Correct')
+incorrect_patch = mpatches.Patch(color=palette[0], label='Incorrect')
+
+# Plot legend
+plt.legend(handles=[correct_patch, incorrect_patch], loc='upper right')
+
+# Axis labels
+plt.grid(True)
+plt.xlabel('Index')
+plt.ylabel('Value')
+plt.title('Actual vs My Prediction with Correctness Color')
+
+plt.tight_layout()
+plt.show()
+```
+
+Or, if we want to compare it directly, we can just look at the correctness values. 
+
+```{python correctness-overall}
+print(f'MAE got {len([i for i in range(len(df)) if list(df["Correctness"])[i]]) * 100 / len(df)}% correct while MSE got {np.round(len([i for i in range(len(df2)) if list(df2["Correctness"])[i]])* 100 / len(df2), 2)}% correct. In comparison, my network got {len([i for i in range(len(df3)) if list(df3["Correctness"])[i]]) * 100 / len(df3)}% correct')
+```
+
+# Analysis
+
+Overall, my network did just as well as the transformers network when using mean average error on these speeches. Although both of these performances were relatively lackluster (only had 45\% success with a 1\% threshold), it's cool to show how my neural network compares to those from the Transformers Import.
 
